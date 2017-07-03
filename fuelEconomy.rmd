@@ -1,0 +1,124 @@
+---
+title: "fuelEconomy"
+author: "Steve Zhang"
+date: "July 3, 2017"
+output: html_document
+---
+
+
+
+## R Markdown
+
+Analysis of United States fuel economy dataset courtesy of the U.S. Department of Energy and the U.S. Environmental Protection Agency.
+
+```{r}
+vehicles = read.csv("vehicles.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+labels = do.call(rbind, strsplit(readLines("varlabels.txt"), " - "))
+```
+```{r}
+names(vehicles)
+```
+```{r}
+cat("First year in dataset:", min(vehicles$year))
+cat("Most recent year in dataset:", max(vehicles$year))
+cat("Number of unique years in dataset:", length(unique(vehicles$year)))
+```
+
+Create a table of fuel types used by the vehicles in the dataset.
+
+```{r}
+table(vehicles$fuelType1)
+```
+
+Clean up transmission data and set to either Automatic or Manual
+```{r}
+vehicles$trany[vehicles$trany == ""] = NA
+vehicles$trany2 = ifelse(substr(vehicles$trany, 1, 4) == "Auto", "Auto", "Manual")
+vehicles$trany2 = as.factor(vehicles$trany2)
+table(vehicles$trany2)
+```
+
+Use ddply to group by year and compute MPG for highway, city and combined.
+
+```{r}
+library(plyr)
+library(ggplot2)
+library(reshape2)
+```
+
+
+```{r}
+mpgYear = ddply(vehicles, ~year, summarise, avgMPG = mean(comb08), avgHwy = mean(highway08),
+                avgCity = mean(city08))
+```
+
+```{r}
+ggplot(mpgYear, aes(year, avgMPG)) + geom_point() + geom_smooth() +
+    xlab("Year") + ylab("Average MPG") + ggtitle("All Cars")
+```
+```{r}
+gasCars = subset(vehicles, fuelType1 %in% c("Regular Gasoline", "Premium Gasoline", "Midgrade Gasoline") & fuelType2 == "" & atvType != "Hybrid")
+```
+
+```{r}
+gasCars$displ = as.numeric(gasCars$displ)
+ggplot(gasCars, aes(displ, comb08)) + geom_point() + geom_smooth()
+```
+Make a graph of average displacement vs. year.
+
+```{r}
+avgCarSize = ddply(gasCars, ~year, summarise, avgDispl = mean(displ))
+ggplot(avgCarSize, aes(year, avgDispl)) + geom_point() + geom_smooth() +
+    xlab("Year") + ylab("Average Engine displacement (L)")
+```
+
+```{r}
+byYear = ddply(gasCars, ~year, summarise, avgMPG = mean(comb08), avgDispl=mean(displ))
+```
+
+Convert byYear data frame from wide format to long format with melt function.
+```{r}
+byYear2 = melt(byYear, id = "year")
+levels(byYear2$variable) = c("Average MPG", "Avg Engine Displacement")
+```
+
+
+```{r}
+ggplot(byYear2, aes(year, value)) + geom_point() + geom_smooth() + 
+    facet_wrap(~variable, ncol=1, scales="free_y") + xlab("Year") + ylab("")
+```
+```{r}
+gasCars4 = subset(gasCars, cylinders == "4")
+ggplot(gasCars4, aes(factor(year), comb08)) + geom_boxplot() + facet_wrap(~trany2, ncol = 1) + theme(axis.text.x = element_text(angle=45)) + labs(x="Year", y="MPG")
+```
+```{r}
+ggplot(gasCars4, aes(factor(year), fill=factor(trany2))) + geom_bar(position = "fill") + labs(x="Year", y="Proportion", fill="Transmission") + theme(axis.text.x = element_text(angle = 45)) + geom_hline(yintercept = 0.5, linetype=2)
+```
+```{r}
+carsMake = ddply(gasCars4, ~year, summarise, numberOfMakes = length(unique(make)))
+ggplot(carsMake, aes(year, numberOfMakes)) + geom_point() + labs(x="Year", y="Number Makes") +ggtitle("Four cylinder cars")
+```
+
+Makes available during every year of the study.
+```{r}
+uniqMakes = dlply(gasCars4, ~year, function(x) unique(x$make))
+commonMakes = Reduce(intersect, uniqMakes)
+commonMakes
+```
+
+```{r}
+carsCommonMakes4 = subset(gasCars4, make %in% commonMakes)
+avgMPG_common = ddply(carsCommonMakes4, ~year + make, summarise, avgMPG=mean(comb08))
+ggplot(avgMPG_common, aes(year, avgMPG)) + geom_line() + facet_wrap(~make, nrow = 3)
+```
+
+```{r}
+commonCars = subset(vehicles, make %in% commonMakes)
+avgMPG_common = ddply(commonCars, ~year + make, summarise, avgMPG=mean(comb08))
+ggplot(avgMPG_common, aes(year, avgMPG)) + geom_line() + facet_wrap(~make, nrow = 3)
+```
+
+
