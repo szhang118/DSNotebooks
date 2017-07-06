@@ -1,0 +1,212 @@
+---
+title: "NFLSimulation"
+author: "Steve Zhang"
+date: "July 6, 2017"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(XML)
+library(RSQLite)
+library(stringr)
+```
+```{r}
+year = 2013
+offense = read.csv("offense.csv", stringsAsFactors = FALSE)
+head(offense)
+```
+```{r}
+defense = read.csv("defense.csv", stringsAsFactors = FALSE)
+head(defense)
+```
+
+Clean up offense data by changing to appropriate data types and convert time of possesion to seconds from minutes.
+```{r}
+offense[, 1] = as.character(offense[, 1])
+offense[, 2:13] = apply(offense[, 2:13], 2, as.numeric)
+offense[, 14] = as.numeric(substr(offense[, 14], 1, 2)) * 60 
+```
+
+Clean up defense data in similar way.
+```{r}
+defense[, 1] = as.character(defense[, 1])
+defense[, 2:13] = apply(defense[, 2:13], 2, as.numeric)
+```
+
+Merge offense and defense data frames and clean up columns.
+```{r}
+combine = merge(offense, defense, by.x="Team", by.y = "Team")
+```
+
+```{r}
+colnames(combine)[2] = "Games"
+colnames(combine)[3] = "OffPPG"
+colnames(combine)[4] = "OffYPG"
+colnames(combine)[5] = "OffPassYPG"
+colnames(combine)[6] = "OffRushYPG"
+combine$G.y = NULL
+colnames(combine)[15] = "DefPPG"
+colnames(combine)[16] = "DefYPG"
+colnames(combine)[17] = "DefRushYPG"
+colnames(combine)[18] = "DefPassYPG"
+```
+```{r}
+combine$X = NULL
+```
+
+```{r}
+hist(combine$OffPPG, breaks = 10, main="Offensive PPG", xlab="PPG", ylab="Number Teams")
+```
+```{r}
+summary(combine$OffPPG)
+```
+
+```{r}
+hist(combine$DefPPG, breaks = 10, main="Defensive PPG", xlab = "PPG", ylab = "Number Teams")
+```
+```{r}
+hist(combine$X1stD.G, breaks=10, main="Offensive 1st Downs/Game",
+     xlab="First Downs", ylab="Number Teams")
+```
+
+Create bar chart for teams offensive PPG.
+```{r}
+ppg = transform(combine, Team=reorder(Team, combine$OffPPG))
+ggplot(ppg, aes(x=Team, y=OffPPG)) + geom_bar(stat="identity", color="black", fill="blue")+
+    coord_flip() + labs(x="Team", y="OffPPG") + ggtitle("Average Points Per Game") +
+    theme(plot.title = element_text(size=18, face="bold"))
+```
+
+```{r}
+ypg = transform(combine, Team=reorder(Team, -combine$DefYPG))
+ggplot(ypg, aes(x=Team, y=DefYPG)) + geom_bar(stat="identity", color="black", fill="blue")+
+    coord_flip() + labs(x="Team", y="Avg Yards PPG") + ggtitle("Avg Yards Allowed") +
+    theme(plot.title = element_text(size=18, face="bold"))
+```
+
+```{r}
+ggplot(combine, aes(x=OffYPG, y=OffPPG)) + geom_point(shape=5, size=2) + geom_smooth() +
+    labs(x="Yards Per Game", y="Points Per Game") + ggtitle("Offense YPG vs. PPG") +
+    theme(plot.title = element_text(size=18, face="bold"))
+```
+
+```{r}
+ggplot(combine, aes(x=DefYPG, y=DefPPG)) + geom_point(size=2)+geom_smooth() +
+    labs(x="Yards Allowed per game", y="Points Allowed Per game") + ggtitle("Defense Yards vs. Points per Game") + theme(plot.title = element_text(size=15, face="bold"))
+```
+
+```{r}
+combine$TOP = combine$TOP + rnorm(dim(combine)[1], mean = 0.0, sd=20)
+```
+
+```{r}
+ggplot(combine, aes(x=TOP, y=OffPPG)) + geom_point(size=2) + geom_smooth()+
+    labs(x="Time of Possession", y="PPG") + ggtitle("Time of Possession vs. Points Per Game") + theme(plot.title = element_text(size=15, face="bold"))
+```
+
+Create indices for offensive strength.
+```{r}
+offense$OPassStrength = max(offense[, 5]) - offense[, 5]
+offense$OPassStrength = (1 - (offense$OPassStrength/max(offense$OPassStrength)))*100
+offense$ORushStrength = max(offense[, 6]) - offense[, 6]
+offense$ORushStrength = (1 - (offense$ORushStrength/max(offense$ORushStrength)))*100
+offense$OPPGStrength = max(offense[, 3]) - offense[, 3]
+offense$OPPGStrength = (1 - (offense$OPPGStrength/max(offense$OPPGStrength)))*100
+offense$OYPGStrength = max(offense[, 4]) - offense[, 4]
+offense$OYPGStrength = (1 - (offense$OYPGStrength/max(offense$OYPGStrength)))*100
+```
+
+Create consolidated measure of offensive strength
+```{r}
+offense$OffStrength = (offense$OPassStrength + offense$ORushStrength + offense$OPPGStrength + offense$OYPGStrength)/4
+```
+
+Create measures of defensive strength
+```{r}
+defense$DPassStrength = max(defense[, 6]) - defense[, 6]
+defense$DPassStrength = defense$DPassStrength/max(defense$DPassStrength)*100
+defense$DRushStrength = max(defense[, 5]) - defense[, 5]
+defense$DRushStrength = defense$DRushStrength/max(defense$DRushStrength)*100
+defense$DPPGStrength = max(defense[, 3]) - defense[, 3]
+defense$DPPGStrength = defense$DPPGStrength/max(defense$DPPGStrength)*100
+defense$DYPGStrength = max(defense[, 4]) - defense[, 4]
+defense$DYPGStrength = defense$DYPGStrength/max(defense$DYPGStrength)*100
+```
+
+```{r}
+defense$DefStrength = (defense$DPassStrength + defense$DRushStrength + defense$DPPGStrength + defense$DYPGStrength)/4
+```
+
+```{r}
+simGame = function(home_team, away_team){
+    off_game = subset(offense, Team==home_team | Team == away_team)[, c(1, 15, 16, 19)]
+    def_game = subset(defense, Team  == home_team | Team == away_team)[, c(1, 15, 16, 19)]
+    game = merge(off_game, def_game, by.x="Team", by.y="Team")
+    home_off_net = game[game$Team == home_team, ]$OffStrength - game[game$Team==away_team, ]$DefStrength
+    home_points = rnorm(1, mean = home_off_net, sd = 50)
+    away_off_net = game[game$Team == away_team, ]$OffStrength - game[game$Team== home_team, ]$DefStrength
+    away_points = rnorm(1, mean = away_off_net, sd = 50)
+    if (home_points > away_points) {
+        return(list(winner=home_team, loser=away_team))   
+    } else {
+        return(list(winner=away_team, loser=home_team))
+    }
+}
+```
+
+```{r}
+simSeason = function() {
+    #games_per_team = 16
+    #create a schedule of games for the specified number of games per team
+   # for (week in 1:games_per_team) {
+    #    home_index = sample(1:32, 16, replace = FALSE)
+     #   home_teams = data.frame(HomeTeam = offense[home_index, 1])
+      #  away_teams = data.frame(AwayTeam = offense[-home_index, 1])
+       # if (week == 1) {
+        #    schedule = cbind(Week=week, HomeTeam=home_teams, AwayTeam = away_teams)
+        #} else {
+        #    temp = cbind(Week=week, HomeTeam=home_teams, AwayTeam=away_teams)
+         #   schedule = rbind(schedule, temp)
+        #}
+    #}
+    schedule = read.csv("2013games.csv", stringsAsFactors = FALSE)
+    names(schedule) = c("HomeTeam", "AwayTeam")
+    records = data.frame(Team=offense$Team)
+    records$Wins = 0
+    records$Losses = 0
+    for(i in 1:nrow(schedule)) {
+        home_team = schedule[i, 1]
+        away_team = schedule[i, 2]
+        n = length(home_team)
+        winners = rep(NA, n)
+        losers = rep(NA, n)
+        for (j in 1:n) {
+            gameResult = simGame(home_team[j], away_team[j])
+            winners[j] = gameResult$winner
+            losers[j] = gameResult$loser
+        }
+        if (i == 1) {
+            results = data.frame(winner=winners, loser=losers)
+        } else {
+            temp = data.frame(winner=winners, loser=losers)
+            results = rbind(results, temp)
+        }
+    }
+    n = nrow(results)
+    for (i in 1:n) {
+        row = results[i, ]
+        winTeam = row$winner
+        loseTeam = row$loser
+        records[records$Team==winTeam, ]$Wins = records[records$Team == winTeam, ]$Wins + 1
+        records[records$Team==loseTeam, ]$Losses = records[records$Team == loseTeam, ]$Losses + 1
+    }
+    return(records)
+}
+```
+
+```{r}
+sim2013 = simSeason()
+```
+
+
