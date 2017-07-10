@@ -1,0 +1,163 @@
+---
+title: "stockSim"
+author: "Steve Zhang"
+date: "July 10, 2017"
+output: html_document
+---
+
+```{r}
+library(XML)
+library(ggplot2)
+library(plyr)
+library(reshape2)
+library(zoo)
+```
+```{r}
+url_to_open <-
+'http://finviz.com/export.ashx?v=152&c=0,1,2,3,4,5,6,7,8,9,10,
+11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,5
+2,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68'
+```
+
+```{r}
+finviz = read.csv("finviz.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+clean_numeric = function(s) {
+    s = gsub("%|\\$|,|\\)|\\(", "", s)
+    s = as.numeric(s)
+}
+```
+
+Remove punctuation from numeric fields with clean_numeric function.
+
+```{r}
+finviz = cbind(finviz[, 1:6], apply(finviz[, 7:68], 2, clean_numeric))
+```
+
+```{r}
+hist(finviz$Price, breaks = 100, main="Price Distribution", xlab="Price")
+```
+
+Put cap on x-axis and make histogram.
+```{r}
+hist(finviz$Price[finviz$Price < 150], breaks = 100, main="Price Distribution", xlab = "Price")
+```
+
+```{r}
+sectorAvgPrice = aggregate(Price~Sector, data = finviz, FUN = "mean")
+colnames(sectorAvgPrice)[2] = "Sector_Avg_Price"
+ggplot(sectorAvgPrice, aes(x=Sector, y=Sector_Avg_Price, fill=Sector)) + geom_bar(stat = "identity") + ggtitle("Sector Avg Prices") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+```{r}
+industryAvg = aggregate(Price~Sector+Industry, data = finviz, FUN = "mean")
+industryAvg = industryAvg[order(industryAvg$Sector, industryAvg$Industry),]
+colnames(industryAvg)[3] = "avgPrice"
+industryChart = subset(industryAvg, Sector == "Financial")
+```
+
+```{r}
+ggplot(industryChart, aes(x=Industry, y=avgPrice, fill=Industry)) + geom_bar(stat="identity") + theme(legend.position = "none") + ggtitle("Industry Avg Prices") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Investigate outlier price in the Property & Casualty Insurance industry.
+
+```{r}
+compChart = subset(finviz, Industry == "Property & Casualty Insurance")
+```
+
+```{r}
+ggplot(compChart, aes(x=Company, y=Price, fill=Company)) + geom_bar(stat="identity") + theme(legend.position = "none") + ggtitle("Company Avg Prices") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Remove Berkshire Hathaway outlier from dataset.
+```{r}
+finviz = subset(finviz, Ticker != "BRK-A")
+sectorAvgPrice = aggregate(Price~Sector, data = finviz, FUN = "mean")
+colnames(sectorAvgPrice)[2] = "Sector_Avg_Price"
+ggplot(sectorAvgPrice, aes(x=Sector, y=Sector_Avg_Price, fill=Sector)) + geom_bar(stat = "identity") + ggtitle("Sector Avg Prices") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+Create summary data frame by Sector.
+```{r}
+sectorAvg = melt(finviz, id="Sector")
+sectorAvg = subset(sectorAvg, variable %in% c("Price", "P.E", "PEG", "P.S", "P.B"))
+sectorAvg = (na.omit(sectorAvg))
+sectorAvg$value = as.numeric(sectorAvg$value)
+sectorAvg = dcast(sectorAvg, Sector ~ variable, mean)
+colnames(sectorAvg)[2:6] = c("SAvgPE", "SAvgPEG", "SAvgPS", "SAvgPB", "SAvgPrice")
+```
+
+Do the same summary process but by Industry instead of Sector.
+```{r}
+industryAvg = melt(finviz, id=c("Sector", "Industry"))
+industryAvg = subset(industryAvg, variable %in% c("Price", "P.E", "PEG", "P.S", "P.B"))
+industryAvg = (na.omit(industryAvg))
+industryAvg$value = as.numeric(industryAvg$value)
+industryAvg = dcast(industryAvg, Sector + Industry ~ variable, mean)
+industryAvg = (na.omit(industryAvg))
+colnames(industryAvg)[3:7] = c("IAvgPE", "IAvgPEG", "IAvgPS", "IAvgPB", "IAvgPrice")
+```
+
+Merge sector and industry average columns into original finviz dataset.
+```{r}
+finviz = merge(finviz, sectorAvg, by.x = "Sector", by.y = "Sector")
+finviz = merge(finviz, industryAvg, by.x=c("Sector", "Industry"), by.y = c("Sector", "Industry"))
+```
+
+Create columns for determining over/underpricing based on comparison with other stocks in Sector and INdustry.
+```{r}
+finviz$SPEUnder <- 0
+finviz$SPEGUnder <- 0
+finviz$SPSUnder <- 0
+finviz$SPBUnder <- 0
+finviz$SPriceUnder <- 0
+finviz$IPEUnder <- 0
+finviz$IPEGUnder <- 0
+finviz$IPSUnder <- 0
+finviz$IPBUnder <- 0
+finviz$IPriceUnder <- 0
+```
+
+Replace 0s with 1s where the value for the stock is less than the average to indicate that the stock may be undervalued based upon that metric.
+```{r}
+finviz$SPEUnder[finviz$P.E<finviz$SAvgPE] <- 1
+finviz$SPEGUnder[finviz$PEG<finviz$SAvgPEG] <- 1
+finviz$SPSUnder[finviz$P.S<finviz$SAvgPS] <- 1
+finviz$SPBUnder[finviz$P.B<finviz$SAvgPB] <- 1
+finviz$SPriceUnder[finviz$Price<finviz$SAvgPrice] <- 1
+finviz$IPEUnder[finviz$P.E<finviz$IAvgPE] <- 1
+finviz$IPEGUnder[finviz$PEG<finviz$IAvgPEG] <- 1
+finviz$IPSUnder[finviz$P.S<finviz$IAvgPS] <- 1
+finviz$IPBUnder[finviz$P.B<finviz$IAvgPB] <- 1
+finviz$IPriceUnder[finviz$Price<finviz$IAvgPrice] <- 1
+```
+
+Sum the 10 columns to create a new column with index value from 1 to 10 indicating how undervalued stock is based on the different dimensions considered.
+
+```{r}
+finviz$RelValIndex = apply(finviz[79:88], 1, sum)
+```
+
+```{r}
+underVal = subset(finviz, RelValIndex >= 8)
+```
+
+```{r}
+head(underVal[, c("Ticker", "Company", "Country")])
+```
+
+Create a set of target stocks based on certain criteria.
+
+```{r}
+targetStocks = subset(finviz, Price > 20 & Price<100 & Volume>10000 & Country == "USA" 
+            & EPS..ttm. > 0 & EPS.growth.next.year > 0 & EPS.growth.next.5.years>0 & Total.Debt.Equity < 1 & Institutional.Ownership < 30 & RelValInex > 8)
+```
+
+```{r}
+targetStocks[, c("Ticker", "Company")]
+```
+
